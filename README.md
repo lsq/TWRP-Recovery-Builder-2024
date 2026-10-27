@@ -75,6 +75,10 @@ only Supports TWRP  (14.1 is not ready yet) / 12.1 / 11 / 9.0
 ## Compilation results
 Can be downloaded at [Release](../../releases)
 
+## Device Tree
+
+* [Mi 10s](https://github.com/sekaiacg/device_xiaomi_alioth-TWRP)
+
 -----
 ## Reference and Credits
 - https://github.com/that1

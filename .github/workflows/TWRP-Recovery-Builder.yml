@@ -3,6 +3,10 @@ name: TWRP Recovery Builder 2024
 on:
   workflow_dispatch:
     inputs:
+      debug_enabled:
+        required: false
+        default: false
+        type: boolean
       MANIFEST_BRANCH:
         description: 'TWRP Minimal-Manifest Branch'
         required: true
@@ -143,13 +147,20 @@ jobs:
             echo "DEVICE_MAKEFILE=twrp_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         elif [ -f ${{ github.event.inputs.DEVICE_PATH }}/omni_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
             echo "DEVICE_MAKEFILE=omni_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+        elif [ -f ${{ github.event.inputs.DEVICE_PATH }}/lineage_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
+            # echo "DEVICE_MAKEFILE=lineage_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+            mv ${{ github.event.inputs.DEVICE_PATH }}/lineage_${{ github.event.inputs.DEVICE_NAME}}.mk ${{ github.event.inputs.DEVICE_PATH }}/twrp_${{ github.event.inputs.DEVICE_NAME}}.mk
+            sed -i "s/lineage_${{ github.event.inputs.DEVICE_NAME }}/twrp_${{ github.event.inputs.DEVICE_NAME }}/g" ${{ github.event.inputs.DEVICE_PATH }}/twrp_${{ github.event.inputs.DEVICE_NAME}}.mk
+            sed -i "s/lineage_${{ github.event.inputs.DEVICE_NAME }}/twrp_${{ github.event.inputs.DEVICE_NAME }}/g" ${{ github.event.inputs.DEVICE_PATH }}/AndroidProducts.mk
+            echo "DEVICE_MAKEFILE=twrp_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
             echo "No recovery makefile file found!"
         fi
       continue-on-error: true
       
     - name: Install Python 2
-      if: github.event.inputs.MANIFEST_BRANCH != 'twrp-11' && github.event.inputs.MANIFEST_BRANCH != 'twrp-12.1'  && github.event.inputs.MANIFEST_BRANCH != 'twrp-14'
+      if: github.event.inputs.MANIFEST_BRANCH != 'twrp-11' && github.event.inputs.MANIFEST_BRANCH != 'twrp-12.1'  && github.event.inputs.MANIFEST_BRANCH != 'twrp-14' && github.event.inputs.MANIFEST_BRANCH != 'twrp-14.1'
+
       run: |
         sudo apt -y install python2
         cd /usr/bin
@@ -160,6 +171,8 @@ jobs:
         cd workspace
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
+        cat ${{ github.event.inputs.DEVICE_PATH }}/AndroidProducts.mk
+        # 4. 针对没有独立 recovery 分区的机型，尝试编译 bootimage 或 vendorboot
         lunch ${{ env.DEVICE_MAKEFILE }}-eng && make clean && make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
         echo "Done building your ${{ github.event.inputs.BUILD_TARGET }}.img"
       
@@ -175,27 +188,41 @@ jobs:
     - name: Check if Recovery Exist
       run: |
         cd workspace
-        if [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img ]; then
+        devicePath=${{ github.event.inputs.DEVICE_NAME }}
+        outputPath=${{ inputs.DEVICE_PATH }}
+        comParePath="${outputPath##*/}"
+        [[ $comParePath != ${{ github.event.inputs.DEVICE_NAME }} ]] && devicePath="${comParePath}"
+        echo "devicePath=$devicePath" >> $GITHUB_ENV
+
+        if [ -f out/target/product/${devicePath}/recovery.img ]; then
             echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
             echo "recovery.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/boot.img ]; then
+            echo "MD5_IMG=$(md5sum out/target/product/${devicePath}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+        elif [ -f out/target/product/${devicePath}/boot.img ]; then
             echo "RECOVERY_TYPE=boot" >> $GITHUB_ENV
             echo "boot.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img ]; then
+            echo "MD5_IMG=$(md5sum out/target/product/${devicePath}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+        elif [ -f out/target/product/${devicePath}/vendor_boot.img ]; then
             echo "RECOVERY_TYPE=vendor_boot" >> $GITHUB_ENV
             echo "vendor_boot.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum out/target/product/${devicePath}/vendor_boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
         else
             echo "No Recovery file found!"
-            cd Exit
+            exit 1
         fi
+
+    - name: Setup upterm session
+      with:
+        wait-timeout-minutes: 20
+        # detached: true
+      # if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+      if: ${{ failure() || inputs.debug_enabled }}
+      uses: owenthereal/action-upterm@v2
 
     - name: Include Recovery Installer
       run: |
         if [ ${{ github.event.inputs.RECOVERY_INSTALLER }} = true ]; then
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
+          cd workspace/out/target/product/${devicePath}/
           wget https://github.com/kinguser981/recovery-installer/releases/download/zip/recovery-installer.zip
           zip -ur recovery-installer.zip ${{ env.RECOVERY_TYPE }}.img
         fi
@@ -204,7 +231,7 @@ jobs:
     - name: Recovery to tar for Samsung devices
       run: |
         if [ ${{ github.event.inputs.RECOVERY_TAR }} = true ]; then
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
+          cd workspace/out/target/product/${devicePath}/
           tar -cvf ${{ env.RECOVERY_TYPE }}.tar ${{ env.RECOVERY_TYPE }}.img
         fi
       continue-on-error: true
@@ -213,9 +240,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.tar
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery-installer.zip
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.img
+          workspace/out/target/product/${devicePath}/${{ env.RECOVERY_TYPE }}.tar
+          workspace/out/target/product/${devicePath}/recovery-installer.zip
+          workspace/out/target/product/${devicePath}/${{ env.RECOVERY_TYPE }}.img
         name: Unofficial TWRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |
@@ -224,8 +251,8 @@ jobs:
       uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
       with:
         files: |
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/obj/PACKAGING/vendor_ramdisk_fragments_intermediates/recovery.*
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk-recovery.*
+          workspace/out/target/product/${devicePath}/obj/PACKAGING/vendor_ramdisk_fragments_intermediates/recovery.*
+          workspace/out/target/product/${devicePath}/ramdisk-recovery.*
         name: Unofficial TWRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |
@@ -238,9 +265,9 @@ jobs:
     - name: Checking For Missing Dependencies
       run: |
         cd tools
-        mv -n libneeds ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-        mv -n ldcheck ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-        cd ../workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
+        mv -n libneeds ${GITHUB_WORKSPACE}/workspace/out/target/product/${devicePath}/recovery/root/
+        mv -n ldcheck ${GITHUB_WORKSPACE}/workspace/out/target/product/${devicePath}/recovery/root/
+        cd ../workspace/out/target/product/${devicePath}/recovery/root
         python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ github.event.inputs.LDCHECK }}
         echo "Done checking missing dependencies. Review, and reconfigure your tree."
       continue-on-error: true

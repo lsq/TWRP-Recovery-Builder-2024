@@ -75,6 +75,10 @@ only Supports TWRP  (14.1 is not ready yet) / 12.1 / 11 / 9.0
 ## Compilation results
 Can be downloaded at [Release](../../releases)
 
+## Device Tree
+
+* [Mi 10s](https://github.com/xiaomi-sm8250-devs/android_device_xiaomi_thyme)
+
 -----
 ## Reference and Credits
 - https://github.com/that1

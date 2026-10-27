@@ -1,0 +1,21 @@
+name: TWRP Recovery Builder 2026 Thyme
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Compilar TWRP
+      uses: kinguser981/TWRP-Recovery-Builder.yml@main
+      with:
+        MANIFEST_BRANCH: 'twrp-12.1'
+        DEVICE_TREE_URL: 'https://github.com/sekaiacg/device_xiaomi_alioth-TWRP'
+        DEVICE_TREE_BRANCH: 'android-13'
+        DEVICE_PATH: 'device/xiaomi/alioth'
+        DEVICE_NAME: 'thyme'
+        BUILD_TARGET: 'recovery'
